@@ -266,35 +266,46 @@ bool JuncTekKGF::verify_checksum(int checksum, const char* buffer)
 
 void JuncTekKGF::loop()
 {
-//todo not needed. uncomment if you do not receive any data, or dont use monitor, or monitor data refresh is turned of
-
-//  const unsigned long start_time = esphome::millis();
-//
-//  if (!this->last_settings_ || (*this->last_settings_ + this->update_settings_interval_) < start_time)
-//  {
-//    this->last_settings_ = start_time;
-//    char buffer[20];
-//    sprintf(buffer, ":R51=%d,2,1,\r\n", this->address_);
-//    write_str(buffer);
-//  }
-//
-//  if (!this->last_stats_ || (*this->last_stats_ + this->update_stats_interval_) < start_time)
-//  {
-//    this->last_stats_ = start_time;
-//    char buffer[20];
-//    sprintf(buffer, ":R50=%d,2,1,\r\n", this->address_);
-//    write_str(buffer);
-//  }
-
-  const unsigned long start_time = esphome::millis();
- 
-  if (!this->last_stats_ || ((*this->last_stats_ + this->update_stats_interval_) < start_time))
-  {
-    if (readline())
-    {      
-      handle_line();
+  // Читаем UART постоянно, пока есть данные в буфере контроллера
+  while (available()) {
+    if (this->readline()) {
+      this->handle_line();
     }
   }
+
+  // Опционально: если датчик "молчит" долгое время, можно 
+  // принудительно запросить данные (но KG-F обычно шлет сам)
+  const unsigned long now = esphome::millis();
+  if (this->update_stats_interval_ > 0 && 
+     (!this->last_stats_ || (now - *this->last_stats_ > this->update_stats_interval_))) {
+       // Здесь можно добавить код запроса, если потребуется
+  }
+}
+
+bool JuncTekKGF::readline()
+{
+  while (available()) {
+    const char readch = read();
+    if (readch > 0) {
+      switch (readch) {
+        case '\r': // Игнорируем возврат каретки
+          break;
+        case '\n': // Конец строки найден
+          this->line_buffer_[this->line_pos_] = 0; // Завершаем строку
+          this->line_pos_ = 0; // Сбрасываем индекс для следующего раза
+          return true;
+        default:
+          if (this->line_pos_ < MAX_LINE_LEN - 1) {
+            this->line_buffer_[this->line_pos_++] = readch;
+            this->line_buffer_[this->line_pos_] = 0;
+          } else {
+            // Если буфер переполнен без символа новой строки, сбрасываем его
+            this->line_pos_ = 0;
+          }
+      }
+    }
+  }
+  return false;
 }
 
 float JuncTekKGF::get_setup_priority() const
